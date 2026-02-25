@@ -1,0 +1,7 @@
+node_modules/
+dist/
+screenshots/
+*.png
+*.gif
+*.mp4
+*.cast
