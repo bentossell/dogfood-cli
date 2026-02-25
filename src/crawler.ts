@@ -125,14 +125,15 @@ export async function crawlSite(rootUrl: string, options: CliOptions): Promise<C
       const altIssues = await findMissingAltIssues(page, pageUrl);
       issues.push(...altIssues);
 
+      // Discover links BEFORE interacting (interactions can navigate/close the page)
+      const links = await page.locator('a[href]').evaluateAll((els) =>
+        els.map((e) => (e as HTMLAnchorElement).href).filter(Boolean)
+      );
+
       if (options.interact) {
         const interactionActions = await interactWithPage(page, options.timeout);
         actions.push(...interactionActions);
       }
-
-      const links = await page.locator('a[href]').evaluateAll((els) =>
-        els.map((e) => (e as HTMLAnchorElement).href).filter(Boolean)
-      );
 
       const discoveredLinks: string[] = [];
       for (const href of links) {
@@ -146,15 +147,17 @@ export async function crawlSite(rootUrl: string, options: CliOptions): Promise<C
 
       actions.push({ type: 'discovery', detail: `Discovered ${discoveredLinks.length} same-origin links`, success: true, timestamp: toIso() });
 
-      // Error screenshots
-      for (let i = 0; i < issues.length; i++) {
-        const issue = issues[i];
-        const errorShot = path.join(options.screenshots, `${String(pageResults.length + 1).padStart(3, '0')}-${screenshotBase}-issue-${i + 1}.png`);
-        try {
-          await page.screenshot({ path: errorShot, fullPage: true });
-          issue.screenshot = errorShot;
-        } catch {
-          // ignore screenshot failures
+      // Error screenshots (page may have been closed by interactions)
+      if (!page.isClosed()) {
+        for (let i = 0; i < issues.length; i++) {
+          const issue = issues[i];
+          const errorShot = path.join(options.screenshots, `${String(pageResults.length + 1).padStart(3, '0')}-${screenshotBase}-issue-${i + 1}.png`);
+          try {
+            await page.screenshot({ path: errorShot, fullPage: true });
+            issue.screenshot = errorShot;
+          } catch {
+            // ignore screenshot failures
+          }
         }
       }
 
@@ -181,11 +184,13 @@ export async function crawlSite(rootUrl: string, options: CliOptions): Promise<C
         timestamp: toIso()
       };
       const errorShot = path.join(options.screenshots, `${String(pageResults.length + 1).padStart(3, '0')}-${slugifyUrl(next.url)}-fatal.png`);
-      try {
-        await page.screenshot({ path: errorShot, fullPage: true });
-        failIssue.screenshot = errorShot;
-      } catch {
-        // ignore
+      if (!page.isClosed()) {
+        try {
+          await page.screenshot({ path: errorShot, fullPage: true });
+          failIssue.screenshot = errorShot;
+        } catch {
+          // ignore
+        }
       }
       allIssues.push(failIssue);
       pageResults.push({
@@ -199,7 +204,7 @@ export async function crawlSite(rootUrl: string, options: CliOptions): Promise<C
         issues: [failIssue]
       });
     } finally {
-      await page.close();
+      if (!page.isClosed()) await page.close();
     }
   }
 
